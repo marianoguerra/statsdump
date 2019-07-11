@@ -5,8 +5,8 @@ Dump system stats (time, load, memory) to stdout as a csv.
 ## Usage
 
 ```
-statsdump 0.2
-dumps system stats to stdout
+statsdump 0.3
+dumps system stats
 
 USAGE:
     statsdump [SUBCOMMAND]
@@ -16,9 +16,10 @@ FLAGS:
     -V, --version    Prints version information
 
 SUBCOMMANDS:
-    help    Prints this message or the help of the given subcommand(s)
-    proc    Collect process information (pid, fd, cmd etc)
-    sys     Collect system information (CPU, Memory)
+    help     Prints this message or the help of the given subcommand(s)
+    mount    Collect mounted fs information
+    proc     Collect process information (pid, fd, cmd etc)
+    sys      Collect system information (CPU, Memory)
 
 ```
 
@@ -42,6 +43,14 @@ statsdump sys --id $(hostname) --interval-secs 1 > stats.csv
 statsdump proc --interval-secs 1
 
 ```
+
+### Print mount stats to stdout
+
+```
+statsdump mount --interval-secs 1
+
+```
+
 `Ctrl-C` to stop
 
 ### Sample System Stats Output
@@ -62,6 +71,16 @@ ganesha,1562673075614,8268804096,599031808,236740608,2146447360,0.6,1.04,0.83
 ```csv
 time_ms,pid,owner,open_fd_count,num_threads,starttime,utime,stime,cmdline
 1562834946950,1,0,-1,1,20,1605,13005,/sbin/init splash
+...
+```
+
+### Sample Process Stats Output
+
+```csv
+time_ms,source,dest,fstype,options,dump,pass
+1562837513947,sysfs,/sys,sysfs,rw;nosuid;nodev;noexec;relatime,0,0
+1562837513947,proc,/proc,proc,rw;nosuid;nodev;noexec;relatime,0,0
+1562837513947,udev,/dev,devtmpfs,rw;nosuid;relatime;size=4013116k;nr_inodes=1003279;mode=755,0,0
 ...
 ```
 

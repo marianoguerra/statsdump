@@ -1,10 +1,13 @@
 use clap::{App, Arg, SubCommand};
 use libc;
+use std::ffi::OsString;
 use std::io;
+use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
 use csv::{self, WriterBuilder};
+use proc_mounts::{self, MountIter};
 use procfs;
 use serde::{Deserialize, Serialize};
 
@@ -165,6 +168,151 @@ pub fn fd_stats_loop(interval: &Duration) {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SwapInfo {
+    time_ms: Option<u128>,
+    source: String,
+    kind: String,
+    size: usize,
+    used: usize,
+    priority: isize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MountInfo {
+    time_ms: Option<u128>,
+    source: String,
+    dest: String,
+    fstype: String,
+    options: String,
+    dump: i32,
+    pass: i32,
+}
+
+impl SwapInfo {
+    pub fn new(
+        time_ms: Option<u128>,
+        source: PathBuf,
+        kind: OsString,
+        size: usize,
+        used: usize,
+        priority: isize,
+    ) -> SwapInfo {
+        SwapInfo {
+            time_ms,
+            source: String::from(source.to_string_lossy()),
+            kind: String::from(kind.to_string_lossy()),
+            size,
+            used,
+            priority,
+        }
+    }
+}
+
+impl MountInfo {
+    pub fn new(
+        time_ms: Option<u128>,
+        source: PathBuf,
+        dest: PathBuf,
+        fstype: &str,
+        options: &Vec<String>,
+        dump: i32,
+        pass: i32,
+    ) -> MountInfo {
+        MountInfo {
+            time_ms,
+            source: String::from(source.to_string_lossy()),
+            dest: String::from(dest.to_string_lossy()),
+            fstype: String::from(fstype),
+            options: options.join(";"),
+            dump,
+            pass,
+        }
+    }
+}
+
+pub fn mount_stats_loop(interval: &Duration) {
+    loop {
+        let time_ms = timestamp();
+        let stdout = io::stdout();
+        let handle = stdout.lock();
+        let mut wtr = WriterBuilder::new().has_headers(true).from_writer(handle);
+        match MountIter::new() {
+            Ok(mount_iter) => {
+                for mount in mount_iter {
+                    match mount {
+                        Ok(proc_mounts::MountInfo {
+                            source,
+                            dest,
+                            fstype,
+                            options,
+                            dump,
+                            pass,
+                        }) => {
+                            let mount_info = MountInfo::new(
+                                time_ms, source, dest, &fstype, &options, dump, pass,
+                            );
+
+                            match wtr.serialize(mount_info) {
+                                Ok(_) => {}
+                                Err(err) => {
+                                    eprintln!("Error writing mount info: {}", err);
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("Error reading mount info: {}", err);
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                eprintln!("Error reading mount info: {}", err);
+            }
+        }
+
+        /*match SwapIter::new() {
+            Ok(swap_iter) => {
+                for swap in swap_iter {
+                    match swap {
+                        Ok(proc_mounts::SwapInfo {
+                            source,
+                            kind,
+                            size,
+                            used,
+                            priority,
+                        }) => {
+                            let swap_info =
+                                SwapInfo::new(time_ms, source, kind, size, used, priority);
+                            match wtr.serialize(swap_info) {
+                                Ok(_) => {}
+                                Err(err) => {
+                                    eprintln!(
+                                        "Error writing swap mount info: {} ({:?})",
+                                        err, swap_info
+                                    );
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("Error reading swap mount info: {}", err);
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                eprintln!("Error reading swap mount info: {}", err);
+            }
+        }*/
+
+        match wtr.flush() {
+            Ok(_) => {}
+            Err(_) => {}
+        }
+        thread::sleep(*interval);
+    }
+}
+
 pub fn setup_signals() {
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
@@ -174,6 +322,7 @@ pub fn setup_signals() {
 pub enum AppOptions {
     SysStats { id: String, interval: Duration },
     FdStats { interval: Duration },
+    MountStats { interval: Duration },
     Stop,
 }
 
@@ -182,6 +331,7 @@ impl AppOptions {
         match self {
             AppOptions::SysStats { id, interval } => sys_stats_loop(id, interval),
             AppOptions::FdStats { interval } => fd_stats_loop(interval),
+            AppOptions::MountStats { interval } => mount_stats_loop(interval),
             AppOptions::Stop => {
                 eprintln!("nothing to do");
             }
@@ -191,9 +341,9 @@ impl AppOptions {
 
 pub fn parse_args() -> AppOptions {
     let matches = App::new("statsdump")
-        .version("0.2")
+        .version("0.3")
         .author("Mariano Guerra <mariano@instadeq.com>")
-        .about("dumps system stats to stdout")
+        .about("dumps system stats")
         .subcommand(
             SubCommand::with_name("sys")
                 .about("Collect system information (CPU, Memory)")
@@ -216,6 +366,17 @@ pub fn parse_args() -> AppOptions {
         .subcommand(
             SubCommand::with_name("proc")
                 .about("Collect process information (pid, fd, cmd etc)")
+                .arg(
+                    Arg::with_name("interval")
+                        .short("s")
+                        .long("interval-secs")
+                        .takes_value(true)
+                        .help("interval in seconds between writes"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("mount")
+                .about("Collect mounted fs information")
                 .arg(
                     Arg::with_name("interval")
                         .short("s")
@@ -253,6 +414,19 @@ pub fn parse_args() -> AppOptions {
                 }
             };
             AppOptions::FdStats {
+                interval: Duration::from_secs(interval_secs),
+            }
+        }
+        Some("mount") => {
+            let cmatches = matches.subcommand_matches("mount").unwrap();
+            let interval_secs = match cmatches.value_of("interval").unwrap_or("5").parse::<u64>() {
+                Ok(n) => n,
+                Err(err) => {
+                    eprintln!("Invalid interval ({}), using default of 5 seconds", err);
+                    5
+                }
+            };
+            AppOptions::MountStats {
                 interval: Duration::from_secs(interval_secs),
             }
         }

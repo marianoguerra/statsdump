@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 libc = "0.2.53"
 procfs = "0.5.3"
+proc-mounts = "0.2.2"
 csv = "1.1"
 serde = { version = "1", features = ["derive"] }
 clap = "2.33.0"
