@@ -74,7 +74,7 @@ time_ms,pid,owner,open_fd_count,num_threads,starttime,utime,stime,cmdline
 ...
 ```
 
-### Sample Process Stats Output
+### Sample Mount Stats Output
 
 ```csv
 time_ms,source,dest,fstype,options,dump,pass
