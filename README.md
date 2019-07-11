@@ -24,21 +24,27 @@ SUBCOMMANDS:
 
 ## Examples
 
-### Print to stdout
+### Print system stats to stdout
 
 ```
-statsdump --id $(hostname) --interval-secs 1
+statsdump sys --id $(hostname) --interval-secs 1
 ```
 
-### Dump to a file
+### Dump system stats to a file
 
 ```
-statsdump --id $(hostname) --interval-secs 1 > stats.csv
+statsdump sys --id $(hostname) --interval-secs 1 > stats.csv
 ```
 
+### Print process stats to stdout
+
+```
+statsdump proc --interval-secs 1
+
+```
 `Ctrl-C` to stop
 
-### Sample Output
+### Sample System Stats Output
 
 ```csv
 id,time_ms,mem_total,mem_free,mem_buffers,mem_cached,load_avg_1,load_avg_5,load_avg_15
@@ -49,6 +55,14 @@ ganesha,1562673072613,8268804096,602386432,236634112,2146725888,0.6,1.04,0.83
 ganesha,1562673073613,8268804096,601354240,236666880,2146148352,0.6,1.04,0.83
 ganesha,1562673074613,8268804096,599031808,236716032,2146627584,0.6,1.04,0.83
 ganesha,1562673075614,8268804096,599031808,236740608,2146447360,0.6,1.04,0.83
+```
+
+### Sample Process Stats Output
+
+```csv
+time_ms,pid,owner,open_fd_count,num_threads,starttime,utime,stime,cmdline
+1562834946950,1,0,-1,1,20,1605,13005,/sbin/init splash
+...
 ```
 
 ## License
