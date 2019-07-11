@@ -80,7 +80,7 @@ time_ms,pid,owner,open_fd_count,num_threads,starttime,utime,stime,cmdline
 time_ms,source,dest,fstype,options,dump,pass,used,available,total,use_pc
 1562840599223,sysfs,/sys,sysfs,rw;nosuid;nodev;noexec;relatime,0,0,0,0,0,0
 1562840599223,proc,/proc,proc,rw;nosuid;nodev;noexec;relatime,0,0,0,0,0,0
-1562840599223,udev,/dev,devtmpfs,rw;nosuid;relatime;size=4013116k;nr_inodes=1003279;m
+1562840599223,udev,/dev,devtmpfs,rw;nosuid;relatime;size=4013116k;nr_inodes=1003279;mode=755,0,0
 1562840599223,/dev/sda10,/home,ext4,rw;relatime,0,0,52739216,222433612,289972288,19
 ...
 ```
