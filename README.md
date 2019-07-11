@@ -5,19 +5,21 @@ Dump system stats (time, load, memory) to stdout as a csv.
 ## Usage
 
 ```
-statsdump 0.1
+statsdump 0.2
 dumps system stats to stdout
 
 USAGE:
-    statsdump [OPTIONS]
+    statsdump [SUBCOMMAND]
 
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
-OPTIONS:
-    -i, --id <ID>                     identifier of the stats, use hostname or similar
-    -s, --interval-secs <interval>    interval in seconds between writes
+SUBCOMMANDS:
+    help    Prints this message or the help of the given subcommand(s)
+    proc    Collect process information (pid, fd, cmd etc)
+    sys     Collect system information (CPU, Memory)
+
 ```
 
 ## Examples

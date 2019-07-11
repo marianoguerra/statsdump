@@ -1,4 +1,4 @@
-use clap::{App, Arg};
+use clap::{App, Arg, SubCommand};
 use libc;
 use std::io;
 use std::thread;
@@ -9,7 +9,7 @@ use procfs;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Row {
+struct SysInfo {
     id: String,
     time_ms: Option<u128>,
     mem_total: Option<u64>,
@@ -21,8 +21,8 @@ struct Row {
     load_avg_15: Option<f32>,
 }
 
-impl Row {
-    pub fn new(id: String) -> Row {
+impl SysInfo {
+    pub fn new(id: String) -> SysInfo {
         let (mem_total, mem_free, mem_buffers, mem_cached) = match procfs::meminfo() {
             Ok(mi) => (
                 Some(mi.mem_total),
@@ -44,15 +44,9 @@ impl Row {
             }
         };
 
-        let time_ms = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-            Ok(n) => Some(n.as_millis()),
-            Err(err) => {
-                eprintln!("Error getting time: {}", err);
-                None
-            }
-        };
+        let time_ms = timestamp();
 
-        Row {
+        SysInfo {
             id,
             time_ms,
             mem_total,
@@ -75,12 +69,22 @@ impl Row {
     }
 }
 
+fn timestamp() -> Option<u128> {
+    match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(n) => Some(n.as_millis()),
+        Err(err) => {
+            eprintln!("Error getting time: {}", err);
+            None
+        }
+    }
+}
+
 pub fn sys_stats_loop(id: &str, interval: &Duration) {
     let mut has_headers = true;
 
     loop {
-        let row = Row::new(String::from(id));
-        match row.write_stdout(has_headers) {
+        let sys_info = SysInfo::new(String::from(id));
+        match sys_info.write_stdout(has_headers) {
             Ok(_) => {}
             Err(err) => {
                 eprintln!("Error writing stats: {}", err);
@@ -92,6 +96,75 @@ pub fn sys_stats_loop(id: &str, interval: &Duration) {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct ProcInfo {
+    time_ms: Option<u128>,
+    pid: i32,
+    owner: u32,
+    open_fd_count: i64,
+    num_threads: i64,
+    starttime: i64,
+    utime: u64,
+    stime: u64,
+    cmdline: String,
+}
+
+impl ProcInfo {
+    pub fn new(time_ms: Option<u128>, proc: &procfs::Process) -> ProcInfo {
+        let open_fd_count = match proc.fd() {
+            Ok(fds) => fds.len() as i64,
+            Err(_) => -1,
+        };
+
+        let cmdline = match proc.cmdline() {
+            Ok(items) => {
+                if items.len() == 0 {
+                    String::from("?")
+                } else {
+                    items.join(" ")
+                }
+            }
+            Err(_) => String::from("?"),
+        };
+
+        ProcInfo {
+            time_ms,
+            pid: proc.stat.pid,
+            owner: proc.owner,
+            open_fd_count,
+            num_threads: proc.stat.num_threads,
+            starttime: proc.stat.starttime,
+            utime: proc.stat.utime,
+            stime: proc.stat.stime,
+            cmdline: cmdline,
+        }
+    }
+}
+
+pub fn fd_stats_loop(interval: &Duration) {
+    loop {
+        let time_ms = timestamp();
+        let stdout = io::stdout();
+        let handle = stdout.lock();
+        let mut wtr = WriterBuilder::new().has_headers(true).from_writer(handle);
+        for process in procfs::all_processes() {
+            let proc_info = ProcInfo::new(time_ms, &process);
+            match wtr.serialize(proc_info) {
+                Ok(_) => {}
+                Err(err) => {
+                    eprintln!("Error serializing proc_info: {}", err);
+                }
+            }
+        }
+
+        match wtr.flush() {
+            Ok(_) => {}
+            Err(_) => {}
+        }
+        thread::sleep(*interval);
+    }
+}
+
 pub fn setup_signals() {
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
@@ -100,49 +173,90 @@ pub fn setup_signals() {
 
 pub enum AppOptions {
     SysStats { id: String, interval: Duration },
+    FdStats { interval: Duration },
+    Stop,
 }
 
 impl AppOptions {
     pub fn run(&self) {
         match self {
             AppOptions::SysStats { id, interval } => sys_stats_loop(id, interval),
+            AppOptions::FdStats { interval } => fd_stats_loop(interval),
+            AppOptions::Stop => {
+                eprintln!("nothing to do");
+            }
         }
     }
 }
 
 pub fn parse_args() -> AppOptions {
     let matches = App::new("statsdump")
-        .version("0.1")
+        .version("0.2")
         .author("Mariano Guerra <mariano@instadeq.com>")
         .about("dumps system stats to stdout")
-        .arg(
-            Arg::with_name("id")
-                .short("i")
-                .long("id")
-                .value_name("ID")
-                .help("identifier of the stats, use hostname or similar")
-                .takes_value(true),
+        .subcommand(
+            SubCommand::with_name("sys")
+                .about("Collect system information (CPU, Memory)")
+                .arg(
+                    Arg::with_name("id")
+                        .short("i")
+                        .long("id")
+                        .value_name("ID")
+                        .help("identifier of the stats, use hostname or similar")
+                        .takes_value(true),
+                )
+                .arg(
+                    Arg::with_name("interval")
+                        .short("s")
+                        .long("interval-secs")
+                        .takes_value(true)
+                        .help("interval in seconds between writes"),
+                ),
         )
-        .arg(
-            Arg::with_name("interval")
-                .short("s")
-                .long("interval-secs")
-                .takes_value(true)
-                .help("interval in seconds between writes"),
+        .subcommand(
+            SubCommand::with_name("proc")
+                .about("Collect process information (pid, fd, cmd etc)")
+                .arg(
+                    Arg::with_name("interval")
+                        .short("s")
+                        .long("interval-secs")
+                        .takes_value(true)
+                        .help("interval in seconds between writes"),
+                ),
         )
         .get_matches();
 
-    let id = matches.value_of("id").unwrap_or("localhost");
-    let interval_secs = match matches.value_of("interval").unwrap_or("5").parse::<u64>() {
-        Ok(n) => n,
-        Err(err) => {
-            eprintln!("Invalid interval ({}), using default of 5 seconds", err);
-            5
-        }
-    };
+    match matches.subcommand_name() {
+        Some("sys") => {
+            let cmatches = matches.subcommand_matches("sys").unwrap();
+            let id = cmatches.value_of("id").unwrap_or("localhost");
+            let interval_secs = match cmatches.value_of("interval").unwrap_or("5").parse::<u64>() {
+                Ok(n) => n,
+                Err(err) => {
+                    eprintln!("Invalid interval ({}), using default of 5 seconds", err);
+                    5
+                }
+            };
 
-    AppOptions::SysStats {
-        id: String::from(id),
-        interval: Duration::from_secs(interval_secs),
+            AppOptions::SysStats {
+                id: String::from(id),
+                interval: Duration::from_secs(interval_secs),
+            }
+        }
+        Some("proc") => {
+            let cmatches = matches.subcommand_matches("proc").unwrap();
+            let interval_secs = match cmatches.value_of("interval").unwrap_or("5").parse::<u64>() {
+                Ok(n) => n,
+                Err(err) => {
+                    eprintln!("Invalid interval ({}), using default of 5 seconds", err);
+                    5
+                }
+            };
+            AppOptions::FdStats {
+                interval: Duration::from_secs(interval_secs),
+            }
+        }
+
+        None | Some(_) => AppOptions::Stop,
     }
 }
