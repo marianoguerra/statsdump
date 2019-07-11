@@ -1,6 +1,6 @@
 use clap::{App, Arg, SubCommand};
 use libc;
-use std::ffi::OsString;
+use std::ffi::{CString, OsString};
 use std::io;
 use std::path::PathBuf;
 use std::thread;
@@ -187,6 +187,10 @@ pub struct MountInfo {
     options: String,
     dump: i32,
     pass: i32,
+    used: u64,
+    available: u64,
+    total: u64,
+    use_pc: u32,
 }
 
 impl SwapInfo {
@@ -209,6 +213,39 @@ impl SwapInfo {
     }
 }
 
+pub fn statvfs(mount_point: &str) -> Option<libc::statvfs> {
+    unsafe {
+        let mountp = CString::new(mount_point).unwrap();
+        let mut stats: libc::statvfs = std::mem::zeroed();
+        if libc::statvfs(mountp.as_ptr(), &mut stats) != 0 {
+            None
+        } else {
+            Some(stats)
+        }
+    }
+}
+
+pub fn fs_usage(mount_point: &str) -> (u64, u64, u64, u32) {
+    match statvfs(mount_point) {
+        Some(stats) => {
+            let total = stats.f_blocks * stats.f_frsize / 1024;
+            let available = stats.f_bavail * stats.f_frsize / 1024;
+            let free = stats.f_bfree * stats.f_frsize / 1024;
+            let used = total - free;
+            let u100 = used * 100;
+            let nonroot_total = used + available;
+            let pct = if nonroot_total == 0 {
+                0
+            } else {
+                u100 / nonroot_total
+            };
+
+            (used, available, total, pct as u32)
+        }
+        None => (0, 0, 0, 100),
+    }
+}
+
 impl MountInfo {
     pub fn new(
         time_ms: Option<u128>,
@@ -219,14 +256,20 @@ impl MountInfo {
         dump: i32,
         pass: i32,
     ) -> MountInfo {
+        let dest_str = dest.to_string_lossy();
+        let (used, available, total, use_pc) = fs_usage(&dest_str);
         MountInfo {
             time_ms,
             source: String::from(source.to_string_lossy()),
-            dest: String::from(dest.to_string_lossy()),
+            dest: String::from(dest_str),
             fstype: String::from(fstype),
             options: options.join(";"),
             dump,
             pass,
+            used,
+            available,
+            total,
+            use_pc,
         }
     }
 }
